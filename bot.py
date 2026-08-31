@@ -117,7 +117,8 @@ async def cmd_mylink(message: Message):
         caption=(
             f"Твоя ссылка, {name}:\n\n"
             f"<code>{vless_link}</code>\n\n"
-            "Импортируй её в клиент (Happ, Karing и т.п.) или отсканируй QR-код."
+            "Импортируй её в клиент (Happ, Karing и т.п.) или отсканируй QR-код.\n\n"
+            "Ссылка привязана к тебе одному — не передавай её другим."
         ),
         parse_mode="HTML",
     )
