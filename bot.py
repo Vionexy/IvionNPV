@@ -9,6 +9,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, BufferedInputFile
 
 from config import BOT_TOKEN, ADMIN_IDS, DB_PATH
+from panel import create_client_link
 
 logging.basicConfig(level=logging.INFO)
 
@@ -86,7 +87,7 @@ async def cmd_start(message: Message):
         await message.answer(
             "Привет, админ.\n\n"
             "Команды:\n"
-            "/adduser <telegram_id> <имя> <vless-ссылка> — добавить друга\n"
+            "/adduser <telegram_id> <имя> — добавить друга (ссылку создаст сам)\n"
             "/removeuser <telegram_id> — убрать доступ\n"
             "/listusers — список всех, кому выдан доступ\n"
             "/mylink — получить свою ссылку (если добавлен себе)"
@@ -129,24 +130,23 @@ async def cmd_adduser(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
     if not command.args:
-        await message.answer(
-            "Использование:\n/adduser <telegram_id> <имя> <vless-ссылка>"
-        )
+        await message.answer("Использование:\n/adduser <telegram_id> <имя>")
         return
-    parts = command.args.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer(
-            "Использование:\n/adduser <telegram_id> <имя> <vless-ссылка>"
-        )
+    parts = command.args.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование:\n/adduser <telegram_id> <имя>")
         return
     try:
         telegram_id = int(parts[0])
     except ValueError:
         await message.answer("telegram_id должен быть числом.")
         return
-    name, vless_link = parts[1], parts[2]
-    if not vless_link.startswith("vless://"):
-        await message.answer("Ссылка должна начинаться с vless://")
+    name = parts[1]
+    await message.answer("Создаю клиента в панели...")
+    try:
+        vless_link = await create_client_link(email=f"{name}-{telegram_id}")
+    except Exception as e:
+        await message.answer(f"Не удалось создать клиента: {e}")
         return
     add_user(telegram_id, name, vless_link)
     await message.answer(f"Добавлено: {name} (ID {telegram_id})")
