@@ -1,6 +1,6 @@
 import json
 import uuid as uuid_lib
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -12,6 +12,16 @@ from config import (
     MEDIA_DOMAIN,
     MEDIA_PORT,
 )
+
+_parts = urlsplit(PANEL_URL)
+_HEADERS = {
+    "Origin": f"{_parts.scheme}://{_parts.netloc}",
+    "Referer": f"{PANEL_URL}/",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+}
 
 
 async def _login(client: httpx.AsyncClient) -> None:
@@ -89,7 +99,7 @@ def _build_vless_link(inbound: dict, client_uuid: str, email: str) -> str:
 
 async def create_client_link(email: str) -> str:
     client_uuid = str(uuid_lib.uuid4())
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
         await _login(client)
         await _add_client(client, PANEL_WS_INBOUND_ID, client_uuid, email)
         inbound = await _get_inbound(client, PANEL_WS_INBOUND_ID)
