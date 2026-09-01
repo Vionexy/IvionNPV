@@ -64,27 +64,24 @@ async def _add_client(
 
 
 def _build_vless_link(inbound: dict, client_uuid: str, email: str) -> str:
+    # TLS для этого сетапа обеспечивает Cloudflare Edge, а не сам Xray —
+    # в streamSettings инбаунда стоит security:none (локально между
+    # туннелем и Xray трафик уже расшифрован). Поэтому в ссылке для
+    # клиента TLS-параметры задаём явно, из MEDIA_DOMAIN, а не берём
+    # из инбаунда. Путь берём из инбаунда динамически — он может меняться.
     stream = json.loads(inbound["streamSettings"])
-    network = stream.get("network", "tcp")
-    security = stream.get("security", "none")
+    ws = stream.get("wsSettings", {})
+    path = ws.get("path", "/")
 
-    params = {"encryption": "none", "type": network, "security": security}
-
-    if network == "ws":
-        ws = stream.get("wsSettings", {})
-        params["path"] = ws.get("path", "/")
-        host = ws.get("host") or ws.get("headers", {}).get("Host", "")
-        if host:
-            params["host"] = host
-
-    if security == "tls":
-        tls = stream.get("tlsSettings", {})
-        alpn = tls.get("alpn")
-        if alpn:
-            params["alpn"] = ",".join(alpn)
-        sni = tls.get("serverName")
-        if sni:
-            params["sni"] = sni
+    params = {
+        "encryption": "none",
+        "type": "ws",
+        "security": "tls",
+        "path": path,
+        "host": MEDIA_DOMAIN,
+        "sni": MEDIA_DOMAIN,
+        "alpn": "http/1.1",
+    }
 
     query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
     return f"vless://{client_uuid}@{MEDIA_DOMAIN}:{MEDIA_PORT}?{query}#{quote(email)}"
