@@ -94,8 +94,11 @@ async def _add_client(
 
 
 def _build_vless_link(inbound: dict, client_uuid: str, email: str) -> str:
-    stream = json.loads(inbound["streamSettings"])
-    ws = stream.get("wsSettings", {})
+    stream = inbound.get("streamSettings")
+    if isinstance(stream, str):
+        stream = json.loads(stream)
+    stream = stream or {}
+    ws = stream.get("wsSettings", {}) or {}
     path = ws.get("path", "/")
 
     params = {
