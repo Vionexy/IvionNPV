@@ -122,3 +122,18 @@ async def create_client_link(email: str) -> str:
         await _add_client(client, PANEL_WS_INBOUND_ID, client_uuid, email)
         inbound = await _get_inbound(client, PANEL_WS_INBOUND_ID)
     return _build_vless_link(inbound, client_uuid, email)
+
+
+async def delete_client(client_uuid: str, inbound_id: int) -> None:
+    async with httpx.AsyncClient(timeout=15, headers=_HEADERS, follow_redirects=True) as c:
+        await _login(c)
+        token = await _get_csrf_token(c)
+        resp = await c.post(
+            f"{PANEL_URL}/panel/api/clients/delete",
+            json={"clientUuid": client_uuid, "inboundId": inbound_id},
+            headers={"X-CSRF-Token": token},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"Не удалось удалить клиента: {data.get('msg')}")
