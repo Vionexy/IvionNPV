@@ -110,7 +110,7 @@ def _build_vless_link(inbound: dict, client_uuid: str, email: str) -> str:
 
 async def create_client_link(email: str) -> str:
     client_uuid = str(uuid_lib.uuid4())
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+    async with httpx.AsyncClient(timeout=15, headers=_HEADERS, follow_redirects=True) as client:
         await _login(client)
         await _add_client(client, PANEL_WS_INBOUND_ID, client_uuid, email)
         inbound = await _get_inbound(client, PANEL_WS_INBOUND_ID)
