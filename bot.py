@@ -1,3 +1,5 @@
+import re
+from panel import create_client_link, delete_client
 import asyncio
 import io
 import logging
@@ -59,6 +61,11 @@ def remove_user(telegram_id: int) -> bool:
     deleted = cur.rowcount > 0
     conn.close()
     return deleted
+
+
+def extract_uuid(vless_link: str):
+    m = re.match(r"vless://([^@]+)@", vless_link)
+    return m.group(1) if m else None
 
 
 def list_users():
@@ -164,10 +171,27 @@ async def cmd_removeuser(message: Message, command: CommandObject):
     except ValueError:
         await message.answer("telegram_id должен быть числом.")
         return
-    if remove_user(telegram_id):
-        await message.answer(f"Доступ для ID {telegram_id} удалён.")
-    else:
+    user = get_user(telegram_id)
+    if not user:
         await message.answer("Такого ID не было в списке.")
+        return
+    name, vless_link = user
+    client_uuid = extract_uuid(vless_link)
+    if not client_uuid:
+        await message.answer("Не смог разобрать ссылку — удали клиента в панели вручную.")
+        return
+    await message.answer("Удаляю клиента из панели...")
+    try:
+        await delete_client(client_uuid, PANEL_WS_INBOUND_ID)
+    except Exception as e:
+        await message.answer(
+            f"Клиент НЕ удалён из панели: {e}\n"
+            f"Удали его вручную, иначе доступ останется. "
+            f"UUID: {client_uuid}"
+        )
+        return
+    remove_user(telegram_id)
+    await message.answer(f"Доступ для {name} (ID {telegram_id}) полностью удалён.")
 
 
 @dp.message(Command("listusers"))
