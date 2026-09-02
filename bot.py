@@ -7,7 +7,14 @@ import sqlite3
 import qrcode
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, BufferedInputFile, BotCommand
+from aiogram.types import (
+    Message,
+    BufferedInputFile,
+    BotCommand,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 
 from config import BOT_TOKEN, ADMIN_IDS, DB_PATH
 from panel import create_client_link, delete_client
@@ -17,6 +24,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+
+# ==================== БАЗА ====================
 
 def init_db() -> None:
     conn = sqlite3.connect(DB_PATH)
@@ -33,7 +42,7 @@ def init_db() -> None:
     try:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
     except sqlite3.OperationalError:
-        pass  # колонка уже есть
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS invites (
@@ -69,7 +78,6 @@ def add_user(telegram_id: int, name: str, email: str, vless_link: str) -> None:
 
 
 def remove_user(telegram_id: int) -> str | None:
-    """Удаляет юзера из БД, возвращает его email (для удаления из панели)."""
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute(
         "SELECT email FROM users WHERE telegram_id = ?", (telegram_id,)
@@ -94,7 +102,6 @@ def add_invite(token: str, name: str, email: str, vless_link: str) -> None:
 
 
 def pop_invite(token: str):
-    """Достаёт приглашение и сразу удаляет (одноразовое)."""
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute(
         "SELECT name, email, vless_link FROM invites WHERE token = ?",
@@ -129,16 +136,19 @@ def make_qr(data: str) -> BufferedInputFile:
 async def set_bot_commands() -> None:
     await bot.set_my_commands([
         BotCommand(command="mylink", description="🔗 Моя ссылка на VPN"),
+        BotCommand(command="addme", description="👤 Выдать доступ себе"),
         BotCommand(command="adduser", description="➕ Пригласить друга"),
-        BotCommand(command="removeuser", description="➖ Удалить пользователя"),
+        BotCommand(command="removeuser", description="🗑 Удалить пользователя"),
         BotCommand(command="listusers", description="📋 Список пользователей"),
         BotCommand(command="start", description="ℹ️ О боте"),
     ])
 
 
+# ==================== /start ====================
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject):
-    # 1) Приглашение: /start <token>
+    # 1) Приглашение другу: /start <token>
     if command.args:
         token = command.args.strip()
         invite = pop_invite(token)
@@ -168,9 +178,9 @@ async def cmd_start(message: Message, command: CommandObject):
         await message.answer(
             "Привет, админ.\n\n"
             "Команды:\n"
-            "/adduser <имя> — создать приглашение для друга\n"
-            "/removeuser <telegram_id> — убрать доступ\n"
-            "/listusers — список пользователей\n"
+            "/addme — выдать доступ себе\n"
+            "/adduser <имя> — приглашение для друга\n"
+            "/listusers — управление пользователями\n"
             "/mylink — твоя ссылка"
         )
         return
@@ -185,6 +195,8 @@ async def cmd_start(message: Message, command: CommandObject):
         f"Привет, {name}! Используй /mylink, чтобы получить ссылку для подключения."
     )
 
+
+# ==================== /mylink ====================
 
 @dp.message(Command("mylink"))
 async def cmd_mylink(message: Message):
@@ -205,6 +217,38 @@ async def cmd_mylink(message: Message):
         parse_mode="HTML",
     )
 
+
+# ==================== /addme ====================
+
+@dp.message(Command("addme"))
+async def cmd_addme(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    telegram_id = message.from_user.id
+    if get_user(telegram_id):
+        await message.answer("У тебя уже есть доступ. /mylink — забирай ссылку.")
+        return
+
+    name = message.from_user.first_name or "admin"
+    email = f"{name.lower()}-{telegram_id}"
+    await message.answer("Создаю клиента в панели...")
+    try:
+        vless_link = await create_client_link(email=email)
+    except Exception as e:
+        await message.answer(f"Не удалось создать клиента: {e}")
+        return
+
+    add_user(telegram_id, name, email, vless_link)
+    qr = make_qr(vless_link)
+    await message.answer(
+        f"Доступ выдан тебе ✅\n\n"
+        f"<code>{vless_link}</code>",
+        parse_mode="HTML",
+    )
+    await message.answer_photo(qr)
+
+
+# ==================== /adduser (приглашение) ====================
 
 @dp.message(Command("adduser"))
 async def cmd_adduser(message: Message, command: CommandObject):
@@ -236,34 +280,28 @@ async def cmd_adduser(message: Message, command: CommandObject):
     )
 
 
+# ==================== /listusers + inline-удаление ====================
+
+def users_keyboard(users) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"👤 {name} (ID {tid})", callback_data=f"del:{tid}")]
+        for tid, name in users
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @dp.message(Command("removeuser"))
 async def cmd_removeuser(message: Message, command: CommandObject):
     if not is_admin(message.from_user.id):
         return
-    if not command.args:
-        await message.answer("Использование:\n/removeuser <telegram_id>")
+    users = list_users()
+    if not users:
+        await message.answer("Список пуст — удалять некого.")
         return
-    try:
-        telegram_id = int(command.args.strip())
-    except ValueError:
-        await message.answer("telegram_id должен быть числом. ID смотри в /listusers.")
-        return
-    user = get_user(telegram_id)
-    if not user:
-        await message.answer("Такого ID не было в списке.")
-        return
-    name, email, _ = user
-    await message.answer("Удаляю клиента из панели...")
-    try:
-        await delete_client(email)
-    except Exception as e:
-        await message.answer(
-            f"Клиент НЕ удалён из панели: {e}\n"
-            f"Удали вручную, иначе доступ останется."
-        )
-        return
-    remove_user(telegram_id)
-    await message.answer(f"Доступ для {name} (ID {telegram_id}) полностью удалён.")
+    await message.answer(
+        "Выбери пользователя, которого удалить (VPN отключится сразу):",
+        reply_markup=users_keyboard(users),
+    )
 
 
 @dp.message(Command("listusers"))
@@ -274,8 +312,74 @@ async def cmd_listusers(message: Message):
     if not users:
         await message.answer("Список пуст.")
         return
-    text = "\n".join(f"{tid} — {name}" for tid, name in users)
-    await message.answer(text)
+    await message.answer(
+        "Пользователи (нажми, чтобы удалить):",
+        reply_markup=users_keyboard(users),
+    )
+
+
+@dp.callback_query(F.data.startswith("del:"))
+async def cb_ask_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Только для админа", show_alert=True)
+        return
+    telegram_id = int(callback.data.split(":")[1])
+    user = get_user(telegram_id)
+    if not user:
+        await callback.answer("Пользователь уже не найден", show_alert=True)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        return
+    name = user[0]
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="🗑 Да, удалить",
+            callback_data=f"delok:{telegram_id}",
+        ),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="delcancel"),
+    ]])
+    await callback.message.answer(
+        f"Удалить {name} (ID {telegram_id})?\n"
+        "⚠️ Его VPN перестанет работать сразу.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "delcancel")
+async def cb_cancel_delete(callback: CallbackQuery):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Отменено ✅")
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("delok:"))
+async def cb_do_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Только для админа", show_alert=True)
+        return
+    telegram_id = int(callback.data.split(":")[1])
+    user = get_user(telegram_id)
+    if not user:
+        await callback.answer("Уже удалён", show_alert=True)
+        return
+    name, email, _ = user
+
+    await callback.answer("Удаляю из панели...")
+    try:
+        await delete_client(email)
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Клиент НЕ удалён из панели: {e}\n"
+            f"Удали вручную, иначе доступ останется."
+        )
+        return
+
+    remove_user(telegram_id)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        f"✅ {name} (ID {telegram_id}) полностью удалён. VPN отключён."
+    )
+    await callback.answer()
 
 
 @dp.message()
