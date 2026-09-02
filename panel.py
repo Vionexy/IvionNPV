@@ -76,7 +76,7 @@ async def _add_client(
             "limitIp": 1,
             "totalGB": 0,
             "expiryTime": 0,
-            "tgId": "",
+            "tgId": 0,
             "subId": sub_id,
             "reset": 0,
         },
