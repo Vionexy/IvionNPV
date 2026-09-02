@@ -63,24 +63,28 @@ async def _add_client(
     client_uuid: str,
     email: str,
 ) -> None:
-    # Перед мутацией обновляем CSRF-токен (он одноразовый)
+    # Свежий CSRF-токен перед мутацией
     token = await _get_csrf_token(client)
-    settings = {
-        "clients": [
-            {
-                "id": client_uuid,
-                "email": email,
-                "enable": True,
-                "flow": "",
-                "limitIp": 1,
-                "totalGB": 0,
-                "expiryTime": 0,
-            }
-        ]
+
+    sub_id = email[:16] + uuid_lib.uuid4().hex[:4]
+    payload = {
+        "client": {
+            "id": client_uuid,
+            "email": email,
+            "enable": True,
+            "flow": "",
+            "limitIp": 1,
+            "totalGB": 0,
+            "expiryTime": 0,
+            "tgId": "",
+            "subId": sub_id,
+            "reset": 0,
+        },
+        "inboundIds": [inbound_id],
     }
     resp = await client.post(
-        f"{PANEL_URL}/panel/api/inbounds/addClient",
-        json={"id": inbound_id, "settings": json.dumps(settings)},
+        f"{PANEL_URL}/panel/api/clients/add",
+        json=payload,
         headers={"X-CSRF-Token": token},
     )
     resp.raise_for_status()
