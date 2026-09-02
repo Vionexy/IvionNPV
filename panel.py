@@ -1,4 +1,5 @@
 import json
+import re
 import uuid as uuid_lib
 from urllib.parse import quote, urlsplit
 
@@ -24,10 +25,22 @@ _HEADERS = {
 }
 
 
+async def _get_csrf_token(client: httpx.AsyncClient) -> str:
+    # Заходим на страницу панели: получаем cookie-сессию и CSRF-токен
+    resp = await client.get(f"{PANEL_URL}/")
+    resp.raise_for_status()
+    m = re.search(r'name="csrf-token"\s+content="([^"]+)"', resp.text)
+    if not m:
+        raise RuntimeError("csrf-token не найден на странице панели")
+    return m.group(1)
+
+
 async def _login(client: httpx.AsyncClient) -> None:
+    token = await _get_csrf_token(client)
     resp = await client.post(
         f"{PANEL_URL}/login",
         json={"username": PANEL_USERNAME, "password": PANEL_PASSWORD},
+        headers={"X-CSRF-Token": token},
     )
     resp.raise_for_status()
     data = resp.json()
@@ -50,6 +63,8 @@ async def _add_client(
     client_uuid: str,
     email: str,
 ) -> None:
+    # Перед мутацией обновляем CSRF-токен (он одноразовый)
+    token = await _get_csrf_token(client)
     settings = {
         "clients": [
             {
@@ -66,6 +81,7 @@ async def _add_client(
     resp = await client.post(
         f"{PANEL_URL}/panel/api/inbounds/addClient",
         json={"id": inbound_id, "settings": json.dumps(settings)},
+        headers={"X-CSRF-Token": token},
     )
     resp.raise_for_status()
     data = resp.json()
@@ -74,11 +90,6 @@ async def _add_client(
 
 
 def _build_vless_link(inbound: dict, client_uuid: str, email: str) -> str:
-    # TLS для этого сетапа обеспечивает Cloudflare Edge, а не сам Xray —
-    # в streamSettings инбаунда стоит security:none (локально между
-    # туннелем и Xray трафик уже расшифрован). Поэтому в ссылке для
-    # клиента TLS-параметры задаём явно, из MEDIA_DOMAIN, а не берём
-    # из инбаунда. Путь берём из инбаунда динамически — он может меняться.
     stream = json.loads(inbound["streamSettings"])
     ws = stream.get("wsSettings", {})
     path = ws.get("path", "/")
