@@ -9,9 +9,7 @@ import qrcode
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, BufferedInputFile
-
 from config import BOT_TOKEN, ADMIN_IDS, DB_PATH, PANEL_WS_INBOUND_ID
-from panel import create_client_link
 
 logging.basicConfig(level=logging.INFO)
 
