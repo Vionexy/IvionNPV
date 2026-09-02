@@ -1,15 +1,16 @@
-import re
-from panel import create_client_link, delete_client
 import asyncio
 import io
 import logging
+import re
 import sqlite3
 
 import qrcode
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, BufferedInputFile, BotCommand
+
 from config import BOT_TOKEN, ADMIN_IDS, DB_PATH, PANEL_WS_INBOUND_ID
+from panel import create_client_link, delete_client
 
 logging.basicConfig(level=logging.INFO)
 
@@ -61,11 +62,6 @@ def remove_user(telegram_id: int) -> bool:
     return deleted
 
 
-def extract_uuid(vless_link: str):
-    m = re.match(r"vless://([^@]+)@", vless_link)
-    return m.group(1) if m else None
-
-
 def list_users():
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("SELECT telegram_id, name FROM users").fetchall()
@@ -83,6 +79,16 @@ def make_qr(data: str) -> BufferedInputFile:
     img.save(buf, format="PNG")
     buf.seek(0)
     return BufferedInputFile(buf.read(), filename="vless_qr.png")
+
+
+async def set_bot_commands() -> None:
+    await bot.set_my_commands([
+        BotCommand(command="mylink", description="🔗 Моя ссылка на VPN"),
+        BotCommand(command="adduser", description="➕ Добавить пользователя"),
+        BotCommand(command="removeuser", description="➖ Удалить пользователя"),
+        BotCommand(command="listusers", description="📋 Список пользователей"),
+        BotCommand(command="start", description="ℹ️ О боте"),
+    ])
 
 
 @dp.message(Command("start"))
@@ -174,18 +180,14 @@ async def cmd_removeuser(message: Message, command: CommandObject):
         await message.answer("Такого ID не было в списке.")
         return
     name, vless_link = user
-    client_uuid = extract_uuid(vless_link)
-    if not client_uuid:
-        await message.answer("Не смог разобрать ссылку — удали клиента в панели вручную.")
-        return
     await message.answer("Удаляю клиента из панели...")
     try:
-        await delete_client(client_uuid, PANEL_WS_INBOUND_ID)
+        # email клиента = {name}-{telegram_id}, как при создании
+        await delete_client(f"{name}-{telegram_id}")
     except Exception as e:
         await message.answer(
             f"Клиент НЕ удалён из панели: {e}\n"
-            f"Удали его вручную, иначе доступ останется. "
-            f"UUID: {client_uuid}"
+            f"Удали вручную, иначе доступ останется."
         )
         return
     remove_user(telegram_id)
@@ -215,6 +217,7 @@ async def fallback(message: Message):
 
 async def main():
     init_db()
+    await set_bot_commands()
     await dp.start_polling(bot)
 
 
